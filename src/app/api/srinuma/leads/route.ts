@@ -1,0 +1,10 @@
+import { NextRequest } from 'next/server';
+import { auth,success,fail,s } from '@/lib/srinuma/api';
+import { rows,append,replace,nextId,withLock,now,audit } from '@/lib/srinuma/store';
+const services=['website','crm','invention'];const statuses=['New','Follow-up','Converted','Closed'];
+export async function GET(req:NextRequest){try{await auth(req,true);return success({leads:(await rows('Leads')).items});}catch(e){return fail(e,401);}}
+export async function POST(req:NextRequest){try{const actor=await auth(req,true),v=await req.json() as Record<string,unknown>;if(!s(v.customer_name,160)||!s(v.requirement,3000)||!services.includes(s(v.service_type)))throw Error('Customer, service and requirement are required');
+ const lead=await withLock('Leads',async()=>{const time=now(),record={lead_id:await nextId('Leads'),created_at:time,customer_name:s(v.customer_name,160),company_name:s(v.company_name,160),phone:s(v.phone,32),address:s(v.address,500),service_type:s(v.service_type),project_name:s(v.project_name,200),requirement:s(v.requirement,3000),extra_features:s(v.extra_features,2000),status:'New',assigned_employee_id:'',updated_at:time};await append('Leads',record);return record;});await audit(actor.id,'CREATE','Leads',lead.lead_id);return success({lead},201);
+ }catch(e){return fail(e);}}
+export async function PATCH(req:NextRequest){try{const actor=await auth(req,true),v=await req.json() as Record<string,unknown>,id=s(v.lead_id,80);if(!id)throw Error('Lead ID required');const changes:Record<string,string>={updated_at:now()};if(v.status!==undefined){if(!statuses.includes(s(v.status)))throw Error('Invalid lead status');changes.status=s(v.status);}if(v.assigned_employee_id!==undefined){const emp=s(v.assigned_employee_id,80);if(emp&&!((await rows('Employees')).items.some(x=>x.employee_id===emp&&x.active.toLowerCase()==='true')))throw Error('Employee not found or inactive');changes.assigned_employee_id=emp;}
+ const lead=await withLock('Leads',()=>replace('Leads','lead_id',id,changes));await audit(actor.id,'UPDATE','Leads',id);return success({lead});}catch(e){return fail(e);}}
